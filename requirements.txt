@@ -1,0 +1,7 @@
+datetime
+time
+selenium==3.141.0
+pandas
+regex
+configuration
+fake-headers

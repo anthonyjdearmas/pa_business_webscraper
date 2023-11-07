@@ -1,0 +1,7 @@
+To get started you must have Chrome and Python 3+ installed.
+
+To install all Python dependencies run the following command in a CMD instance: pip install -r requirements.txt
+
+To use the script, just run selenium_food_safety.py.
+
+There are many configuration options in the configuration.py file.
