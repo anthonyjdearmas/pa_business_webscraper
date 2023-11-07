@@ -102,8 +102,8 @@ countiesToSearchFor = [
 # Start and end date fields to search for.
 # Keep blank to use yesterday's date as the start date and today's date as the end date.
 # Date Format: MM/DD/YYYY
-startDate = '09/25/2023'
-endDate = '11/7/2023'
+startDate = ''
+endDate = ''
 
 # Set this to 'True' if you find your computer is slow and skipping over violations.
 # Note: This will make the program take longer to run but have more consistent results in laggy situations.

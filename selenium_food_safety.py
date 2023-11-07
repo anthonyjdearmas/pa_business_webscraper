@@ -18,7 +18,7 @@ if cfg.isGlitching:
 def getDates():
     todaysDate = datetime.datetime.now().strftime("%m/%d/%Y")
     yesterdaysDate = (datetime.datetime.now() -
-                      datetime.timedelta(days=10)).strftime("%m/%d/%Y")
+                      datetime.timedelta(days=1)).strftime("%m/%d/%Y")
     return todaysDate, yesterdaysDate
 
 
@@ -206,7 +206,7 @@ def runSearch():
 
     PACounties = filterCounties(getCounties(driver))
     if cfg.startDate == '' or cfg.endDate == '':
-        startDate, endDate = getDates()
+        endDate, startDate = getDates()
     else:
         startDate = cfg.startDate
         endDate = cfg.endDate
