@@ -7,6 +7,12 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
 import pandas as pd
 import re
+import configuration as cfg
+from fake_headers import Headers
+
+timeDelay = 1.5
+if cfg.isGlitching:
+    timeDelay = 4
 
 
 def getDates():
@@ -17,7 +23,10 @@ def getDates():
 
 
 def filterCounties(counties):
-    counties.pop("UNKNOWN", None)
+    for key in list(counties.keys()):
+        if key.lower() not in [county.lower() for county in cfg.countiesToSearchFor]:
+            counties.pop(key)
+    return counties
 
 
 def getCounties(driver):
@@ -84,32 +93,8 @@ def goToNextPage(driver, pageNum):
 
 
 def certification_needed(input_string):
-    certification_keywords = [
-        r"certified food employee",
-        r"certified food manager certificate",
-        r"certified food manager",
-        r"certification is not posted",
-        r"food employee certification",
-        r"food facility has lost its certified food employee",
-        r"food facility does not employ a certified food employee",
-        r"food facility does not have an employee with Chester County Certified Food Manager certification",
-        r"food facility does not yet employ a certified",
-        r"food facility does not yet have an employee with Chester County Certified Food Manager certification",
-        r"food facility lost its certified employee",
-        r"food facility lost its certified food employee",
-        r"food facility lost its certified food manager",
-        r"food facility has an employee who held a Certified Food Manager certificate",
-        r"food facility has an employee that has taken food safety training program",
-        r"food facility has an employee who held a Certified Food Manager certificate",
-        r"food facility does not yet employ a certified food employee",
-        r"no certified employee",
-        r"no certified employee, no certificate",
-        r"certified supervisory employee",
-        r"supervisory employee certification",
-        r"get this certification"
-    ]
-
-    for keyword in certification_keywords:
+    phrasesToFlagForInViolations = cfg.phrasesToFlagForInViolations
+    for keyword in phrasesToFlagForInViolations:
         if re.search(keyword, input_string, re.IGNORECASE):
             return True
     return False
@@ -121,9 +106,9 @@ def violationHTMLContainsCertificationViolation(driver):
             commentElement = driver.find_element(
                 By.ID, "MainContent_wucPublicInspectionViolations_rptViolations_pnlComments_" + str(i))
             if certification_needed(commentElement.text):
-                return True
+                return True, commentElement.text
         except:
-            return False
+            return False, ""
 
 
 def combineAllGridItems(gridItems, gridAltItems):
@@ -138,12 +123,33 @@ def combineAllGridItems(gridItems, gridAltItems):
     return combinedList
 
 
-def getBusinessesWithViolationsOnPage(driver, leftOffAtRow=0):
+def saveBusinessInfoToFile(facilityInfo, inspectionDate, county, violationText):
+    filename = "certification_violations_" + \
+        datetime.datetime.now().strftime("%m-%d-%Y") + ".csv"
+    if cfg.haveExcelProductKey:
+        pd.set_option('display.max_colwidth', 0)
+    try:
+        df = pd.read_csv(filename, dtype=str)
+        new_row = {'Facility Info': facilityInfo,
+                   'Inspection Date': str(inspectionDate),
+                   'County': county,
+                   'Violation Text': str(violationText)}
+        df = df._append(new_row, ignore_index=True)
+    except FileNotFoundError:
+        data = {'Facility Info': [facilityInfo],
+                'Inspection Date': [str(inspectionDate)],
+                'County': [county],
+                'Violation Text': [str(violationText)]}
+        df = pd.DataFrame(data, dtype=str)
+    df.to_csv(filename, index=False)
+
+
+def getBusinessesWithViolationsOnPage(driver, leftOffAtRow=0, county=''):
     gridItems = driver.find_elements(By.CLASS_NAME, "GridItem")
     gridAltItems = driver.find_elements(By.CLASS_NAME, "GridAltItem")
     combinedGridItems = combineAllGridItems(gridItems, gridAltItems)
 
-    if leftOffAtRow >= len(combinedGridItems):
+    if int(leftOffAtRow) >= len(combinedGridItems):
         return
 
     for gridItem in combinedGridItems[leftOffAtRow:]:
@@ -157,43 +163,67 @@ def getBusinessesWithViolationsOnPage(driver, leftOffAtRow=0):
                 violationPanelButton = tdElements[i].find_element(
                     By.TAG_NAME, "a")
                 violationPanelButton.click()
-                time.sleep(1)
-                if (violationHTMLContainsCertificationViolation(driver)):
-                    print("Found a violation!")
-                    driver.save_screenshot(
-                        "violation" + str(leftOffAtRow) + ".png")
+                time.sleep(timeDelay)
+                containsCertificationViolation, violationtext = violationHTMLContainsCertificationViolation(
+                    driver)
+                if (containsCertificationViolation):
+                    facilityInfoElement = driver.find_element(
+                        By.ID, "MainContent_wucPublicInspectionViolations_lblFacilityInformation")
+                    inspectionDateElement = driver.find_element(
+                        By.ID, "MainContent_wucPublicInspectionViolations_lblHeader")
+                    inspectionDateInfo = inspectionDateElement.text
+                    inspectionDate = inspectionDateInfo[len(
+                        "Inspection Violations: "):]
+                    facilityInfo = facilityInfoElement.text
+                    saveBusinessInfoToFile(
+                        facilityInfo, inspectionDate, county, violationtext)
                 closeBtn = driver.find_element(By.ID, "cboxClose")
                 closeBtn.click()
-                time.sleep(1)
-                getBusinessesWithViolationsOnPage(driver, leftOffAtRow + 1)
+                time.sleep(timeDelay)
+                getBusinessesWithViolationsOnPage(
+                    driver, leftOffAtRow + 1, county)
                 break
         leftOffAtRow += 1
 
 
 def runSearch():
     chrome_options = Options()
-    chrome_options.add_experimental_option("detach", True)
+    if cfg.runInBackground:
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument('--window-size=1920,1080')
+        header = Headers(
+            browser="chrome",
+            os="win",
+            headers=False
+        )
+        customUserAgent = header.generate()['User-Agent']
+        chrome_options.add_argument(f"user-agent={customUserAgent}")
+    if cfg.keepBrowserOpenAfterFinished:
+        chrome_options.add_experimental_option("detach", True)
     driver = webdriver.Chrome(options=chrome_options)
     url = "https://www.pafoodsafety.pa.gov/Web/Inspection/PublicInspectionSearch.aspx"
     driver.get(url)
 
-    PACounties = getCounties(driver)
-    todaysDate, yesterdaysDate = getDates()
+    PACounties = filterCounties(getCounties(driver))
+    if cfg.startDate == '' or cfg.endDate == '':
+        startDate, endDate = getDates()
+    else:
+        startDate = cfg.startDate
+        endDate = cfg.endDate
 
-    # for each county
-    # for county in dict.items(PACounties):
-    clickComplianceCheckbox(driver)
-    selectCounty(driver, 1)
-    selectStartDate(driver, '10/01/2023')
-    selectEndDate(driver, '11/30/2023')
-    clickSearch(driver)
-    numPages = getNumPagesForCounty(driver)
-    getBusinessesWithViolationsOnPage(driver)
-    for page in range(1, numPages):
-        time.sleep(1)
-        goToNextPage(driver, page)
-        time.sleep(1)
-        getBusinessesWithViolationsOnPage(driver)
+    for county in dict.items(PACounties):
+        clickComplianceCheckbox(driver)
+        selectCounty(driver, county[1])
+        selectStartDate(driver, startDate)
+        selectEndDate(driver, endDate)
+        clickSearch(driver)
+        numPages = getNumPagesForCounty(driver)
+        getBusinessesWithViolationsOnPage(driver, 0, county[0])
+        for page in range(1, numPages):
+            time.sleep(timeDelay)
+            goToNextPage(driver, page)
+            time.sleep(timeDelay)
+            getBusinessesWithViolationsOnPage(driver, 0, county[0])
 
 
 if __name__ == "__main__":
